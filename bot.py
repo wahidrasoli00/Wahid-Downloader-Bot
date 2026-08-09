@@ -62,35 +62,42 @@ def download_and_send(client, message):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # === استخراج هوشمند لینک کست‌باکس ===
-    target_url = raw_url
+    # === بخش ویژه و ایزوله برای کست‌باکس ===
     if "castbox.fm" in raw_url:
         try:
+            target_url = raw_url
             if "d.castbox.fm" in raw_url:
                 parsed = urllib.parse.urlparse(raw_url)
                 qs = urllib.parse.parse_qs(parsed.query)
                 if 'link' in qs:
                     target_url = urllib.parse.unquote(qs['link'][0])
             
-            # خواندن صفحه پادکست برای استخراج مستقیم فایل صوتی
             req = urllib.request.Request(
                 target_url, 
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                }
             )
             with urllib.request.urlopen(req, timeout=15) as response:
                 html_content = response.read().decode('utf-8', errors='ignore')
             
-            # جستجوی فایل صوتی داخل کدهای صفحه
+            audio_url = None
             match = re.search(r'(https?://[^\s<>"]+?\.mp3[^\s<>"]*)', html_content)
-            if not match:
-                match = re.search(r'"enurl"\s*:\s*"([^"]+)"', html_content)
-            
             if match:
                 audio_url = match.group(1).replace('\\u0026', '&')
+            else:
+                match2 = re.search(r'"(?:enurl|audio|media_url|url)"\s*:\s*"([^"]+)"', html_content)
+                if match2:
+                    audio_url = match2.group(1).replace('\\u0026', '&').replace('\\/', '/')
+            
+            if audio_url:
                 file_path = os.path.join(output_dir, "podcast.mp3")
-                
                 msg.edit_text("⏳ در حال دانلود فایل پادکست...")
-                urllib.request.urlretrieve(audio_url, file_path)
+                
+                req_audio = urllib.request.Request(audio_url, headers={'User-Agent': 'Mozilla/5.0'})
+                with urllib.request.urlopen(req_audio) as resp, open(file_path, 'wb') as f:
+                    f.write(resp.read())
                 
                 msg.edit_text("✅ دانلود انجام شد. در حال ارسال به تلگرام...")
                 client.send_audio(
@@ -101,8 +108,12 @@ def download_and_send(client, message):
                 os.remove(file_path)
                 msg.delete()
                 return
-        except Exception:
-            pass
+            else:
+                msg.edit_text("❌ رفیق، لینک فایل صوتی این اپیزود در کست‌باکس محافظت شده است و امکان دانلود مستقیمش با این متد نیست.")
+                return
+        except Exception as e:
+            msg.edit_text(f"❌ خطا در پردازش کست‌باکس:\n{str(e)[:120]}")
+            return
 
     # === بخش دانلود ویدیو و سایر لینک‌ها با yt_dlp ===
     ydl_opts = {
@@ -118,7 +129,7 @@ def download_and_send(client, message):
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(target_url, download=True)
+            info = ydl.extract_info(raw_url, download=True)
             file_path = ydl.prepare_filename(info)
             
             msg.edit_text("✅ دانلود انجام شد. در حال ارسال به تلگرام...")
