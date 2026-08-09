@@ -43,7 +43,7 @@ app_bot = Client(
 
 @app_bot.on_message(filters.command("start"))
 def start(client, message):
-    message.reply_text("سلام رفیق! لینک ویدیو یا پادکست رو بفرست تا بدون افت کیفیت دانلودش کنم.")
+    message.reply_text("سلام رفیق! لینک ویدیو رو بفرست تا برات دانلودش کنم.")
 
 @app_bot.on_message(filters.text & ~filters.command("start"))
 def download_and_send(client, message):
@@ -59,11 +59,16 @@ def download_and_send(client, message):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    # تنظیمات پیشرفته برای فریب دادن ربات‌های سایت مقصد با User-Agent
     ydl_opts = {
-        'format': 'best', 
+        'format': 'best[ext=mp4]/best', 
         'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
+        'geo_bypass': True,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
     }
 
     try:
@@ -83,7 +88,13 @@ def download_and_send(client, message):
             msg.delete()
             
     except Exception as e:
-        msg.edit_text(f"❌ خطا هنگام پردازش:\n{str(e)[:100]}")
+        error_msg = str(e)
+        if "Sign in" in error_msg:
+            msg.edit_text("❌ رفیق، این لینک یوتیوب نیاز به احراز هویت داره و سرورهای رایگان بلاکـن.")
+        elif "no video" in error_msg:
+            msg.edit_text("❌ رفیق، این پست اینستاگرام ویدیویی نداره یا اسلایدیه.")
+        else:
+            msg.edit_text(f"❌ خطا هنگام پردازش:\n{error_msg[:120]}")
 
 if __name__ == "__main__":
     print("🌐 در حال روشن کردن وب‌سرور...")
