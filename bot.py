@@ -5,6 +5,18 @@ from flask import Flask
 from pyrogram import Client, filters
 import yt_dlp
 
+# حل اصولی مشکل Event Loop در پایتون
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    try:
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
 # === بخش وب‌سرور (برای روشن موندن تو رندر) ===
 app_web = Flask(__name__)
 
@@ -78,12 +90,4 @@ if __name__ == "__main__":
     Thread(target=run_web).start()
     
     print("🤖 ربات با موفقیت استارت خورد...")
-    
-    # حل مشکل Event Loop در پایتون‌های جدید
-    try:
-        asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
     app_bot.run()
