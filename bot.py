@@ -1,11 +1,8 @@
 import os
 import asyncio
 from threading import Thread
-import urllib.parse
-import urllib.request
-import re
 from flask import Flask
-from pyrogram import Client, filters
+from pyrogram import Client, filters, types
 import yt_dlp
 
 # حل اصولی مشکل Event Loop در پایتون
@@ -44,107 +41,95 @@ app_bot = Client(
     bot_token=BOT_TOKEN
 )
 
+# دیتای موقت برای نگه داشتن لینک کاربر
+user_states = {}
+
 @app_bot.on_message(filters.command("start"))
 def start(client, message):
-    message.reply_text("سلام رفیق! لینک اینستاگرام یا پادکست کست‌باکس رو بفرست تا برات دانلود کنم.")
+    message.reply_text("سلام رفیق! لینک ویدیو رو بفرست تا بپرسم ویدیوش رو می‌خوای یا آهنگ روش رو.")
 
 @app_bot.on_message(filters.text & ~filters.command("start"))
-def download_and_send(client, message):
-    raw_url = message.text.strip()
+def ask_choice(client, message):
+    url = message.text.strip()
     
-    if not raw_url.startswith("http"):
+    if not url.startswith("http"):
         message.reply_text("❗ رفیق، لطفاً یه لینک معتبر بفرست.")
         return
 
-    msg = message.reply_text("⏳ در حال پردازش و استخراج لینک... صبور باش رفیق.")
+    # ذخیره لینک کاربر
+    user_states[message.chat.id] = url
     
+    # ساخت دکمه‌های انتخاب
+    keyboard = types.InlineKeyboardMarkup([
+        [
+            types.InlineKeyboardButton("🎬 دانلود ویدیو", callback_data="download_video"),
+            types.InlineKeyboardButton("🎵 آهنگ این ویدیو", callback_data="download_audio")
+        ]
+    ])
+    
+    message.reply_text("رفیق، از این لینک چی می‌خوای؟", reply_markup=keyboard)
+
+@app_bot.on_callback_query()
+def handle_choice(client, callback_query):
+    chat_id = callback_query.message.chat.id
+    url = user_states.get(chat_id)
+    
+    if not url:
+        callback_query.answer("لینک منقضی شده رفیق، دوباره بفرستش.")
+        return
+
+    callback_query.answer("در حال پردازش...")
+    callback_query.message.edit_text("⏳ در حال استخراج و دانلود... صبور باش.")
+    
+    mode = callback_query.data
     output_dir = "downloads"
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # === بخش ویژه و ایزوله برای کست‌باکس ===
-    if "castbox.fm" in raw_url:
-        try:
-            target_url = raw_url
-            if "d.castbox.fm" in raw_url:
-                parsed = urllib.parse.urlparse(raw_url)
-                qs = urllib.parse.parse_qs(parsed.query)
-                if 'link' in qs:
-                    target_url = urllib.parse.unquote(qs['link'][0])
-            
-            req = urllib.request.Request(
-                target_url, 
-                headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-                }
-            )
-            with urllib.request.urlopen(req, timeout=15) as response:
-                html_content = response.read().decode('utf-8', errors='ignore')
-            
-            audio_url = None
-            match = re.search(r'(https?://[^\s<>"]+?\.mp3[^\s<>"]*)', html_content)
-            if match:
-                audio_url = match.group(1).replace('\\u0026', '&')
-            else:
-                match2 = re.search(r'"(?:enurl|audio|media_url|url)"\s*:\s*"([^"]+)"', html_content)
-                if match2:
-                    audio_url = match2.group(1).replace('\\u0026', '&').replace('\\/', '/')
-            
-            if audio_url:
-                file_path = os.path.join(output_dir, "podcast.mp3")
-                msg.edit_text("⏳ در حال دانلود فایل پادکست...")
-                
-                req_audio = urllib.request.Request(audio_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req_audio) as resp, open(file_path, 'wb') as f:
-                    f.write(resp.read())
-                
-                msg.edit_text("✅ دانلود انجام شد. در حال ارسال به تلگرام...")
-                client.send_audio(
-                    chat_id=message.chat.id,
-                    audio=file_path,
-                    caption="🎧 پادکست کست‌باکس آماده‌ست رفیق!"
-                )
-                os.remove(file_path)
-                msg.delete()
-                return
-            else:
-                msg.edit_text("❌ رفیق، لینک فایل صوتی این اپیزود در کست‌باکس محافظت شده است و امکان دانلود مستقیمش با این متد نیست.")
-                return
-        except Exception as e:
-            msg.edit_text(f"❌ خطا در پردازش کست‌باکس:\n{str(e)[:120]}")
-            return
-
-    # === بخش دانلود ویدیو و سایر لینک‌ها با yt_dlp ===
+    # تنظیمات هوشمند yt_dlp بدون نیاز به ffmpeg
     ydl_opts = {
-        'format': 'best[ext=mp4]/best', 
-        'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
         'quiet': True,
         'no_warnings': True,
         'geo_bypass': True,
+        'outtmpl': os.path.join(output_dir, '%(title)s.%(ext)s'),
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     }
 
+    if mode == "download_audio":
+        ydl_opts['format'] = 'bestaudio'
+    else:
+        ydl_opts['format'] = 'best[ext=mp4]/best'
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(raw_url, download=True)
+            info = ydl.extract_info(url, download=True)
             file_path = ydl.prepare_filename(info)
             
-            msg.edit_text("✅ دانلود انجام شد. در حال ارسال به تلگرام...")
+            callback_query.message.edit_text("✅ دانلود انجام شد. در حال ارسال به تلگرام...")
             
-            client.send_document(
-                chat_id=message.chat.id,
-                document=file_path,
-                caption="🎬 بفرما رفیق!"
-            )
+            if mode == "download_audio":
+                client.send_audio(
+                    chat_id=chat_id,
+                    audio=file_path,
+                    caption="🎵 بفرما رفیق، اینم آهنگِ روی این ویدیو!"
+                )
+            else:
+                client.send_document(
+                    chat_id=chat_id,
+                    document=file_path,
+                    caption="🎬 بفرما رفیق، اینم خود ویدیو!"
+                )
             
             os.remove(file_path)
-            msg.delete()
+            callback_query.message.delete()
+            
+            if chat_id in user_states:
+                del user_states[chat_id]
             
     except Exception as e:
-        msg.edit_text(f"❌ خطا هنگام پردازش:\n{str(e)[:120]}")
+        callback_query.message.edit_text(f"❌ خطا هنگام پردازش:\n{str(e)[:120]}")
 
 if __name__ == "__main__":
     print("🌐 در حال روشن کردن وب‌سرور...")
