@@ -1,13 +1,9 @@
 import os
+import asyncio
 from threading import Thread
 from flask import Flask
 from pyrogram import Client, filters
 import yt_dlp
-
-# === اطلاعات شخصی ربات تو ===
-API_ID = 36362511
-API_HASH = "afd96a31d309f97fd72a4a6faaf91fc7"
-BOT_TOKEN = "8722548773:AAEC1iX3kGW4wP-jKfWysqFAO4WFz3q-nDE"
 
 # === بخش وب‌سرور (برای روشن موندن تو رندر) ===
 app_web = Flask(__name__)
@@ -19,6 +15,11 @@ def home():
 def run_web():
     port = int(os.environ.get("PORT", 8000))
     app_web.run(host="0.0.0.0", port=port)
+
+# === اطلاعات شخصی ربات تو ===
+API_ID = 36362511
+API_HASH = "afd96a31d309f97fd72a4a6faaf91fc7"
+BOT_TOKEN = "8722548773:AAEC1iX3kGW4wP-jKfWysqFAO4WFz3q-nDE"
 
 # === بخش ربات تلگرام ===
 app_bot = Client(
@@ -75,5 +76,14 @@ def download_and_send(client, message):
 if __name__ == "__main__":
     print("🌐 در حال روشن کردن وب‌سرور...")
     Thread(target=run_web).start()
+    
     print("🤖 ربات با موفقیت استارت خورد...")
+    
+    # حل مشکل Event Loop در پایتون‌های جدید
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
     app_bot.run()
